@@ -1,0 +1,273 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>Telugu Ear</title>
+<style>
+  :root{
+    --bg:#0F3D3E; --ink:#F3E9D2; --dim:#9FBCB0; --gold:#F2B134; --rose:#E4573D; --pane:#154B4C;
+  }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  html,body{margin:0;background:var(--bg);color:var(--ink);
+    font-family:-apple-system,"Noto Sans Telugu",system-ui,sans-serif;height:100%}
+  body{display:flex;flex-direction:column;min-height:100dvh;
+    padding:max(12px,env(safe-area-inset-top)) 16px max(16px,env(safe-area-inset-bottom))}
+  button{font:inherit;color:inherit;border:0;background:none;cursor:pointer}
+
+  header{display:flex;align-items:center;gap:10px}
+  header h1{font-size:17px;font-weight:600;margin:0;flex:1;letter-spacing:.2px}
+  .seg{display:flex;background:var(--pane);border-radius:999px;padding:3px}
+  .seg button{padding:7px 12px;border-radius:999px;font-size:13px;color:var(--dim)}
+  .seg button.on{background:var(--ink);color:var(--bg);font-weight:600}
+  .gear{font-size:20px;padding:6px}
+
+  main{flex:1;display:flex;flex-direction:column;justify-content:center;gap:14px;padding:12px 0}
+  .heard{color:var(--dim);font-size:15px;line-height:1.4;min-height:1.4em}
+  .heard.live::after{content:"…";animation:blink 1s steps(2) infinite}
+  @keyframes blink{50%{opacity:0}}
+  .said{font-size:clamp(26px,7vw,36px);line-height:1.25;font-weight:600;
+    min-height:2.5em;overflow-wrap:anywhere}
+  .said.empty{color:var(--dim);font-weight:400;font-size:18px}
+
+  .replies{display:flex;flex-direction:column;gap:8px}
+  .replies button{background:var(--pane);border-left:4px solid var(--gold);border-radius:10px;
+    padding:10px 12px;text-align:left;line-height:1.3}
+  .replies small{display:block;color:var(--dim);font-size:13px;margin-top:2px}
+
+  footer{display:flex;flex-direction:column;gap:10px}
+  .status{font-size:13px;color:var(--dim);text-align:center;min-height:1.2em}
+  .big{background:var(--gold);color:#1A1A1A;font-size:18px;font-weight:700;
+    padding:16px;border-radius:14px;width:100%}
+  .big.stop{background:var(--rose);color:var(--ink)}
+  .big:disabled{opacity:.5}
+
+  details{margin-top:6px;color:var(--dim);font-size:13px}
+  details summary{cursor:pointer;padding:6px 0}
+  .log{max-height:30dvh;overflow:auto;display:flex;flex-direction:column;gap:10px;padding-top:6px}
+  .log div b{color:var(--ink);font-weight:500;display:block}
+
+  dialog{background:var(--pane);color:var(--ink);border:0;border-radius:14px;padding:18px;
+    width:min(92vw,380px)}
+  dialog::backdrop{background:rgba(0,0,0,.55)}
+  dialog h2{margin:0 0 10px;font-size:17px}
+  dialog p{margin:0 0 12px;font-size:13px;color:var(--dim);line-height:1.4}
+  dialog input{width:100%;padding:11px;border-radius:9px;border:1px solid var(--dim);
+    background:var(--bg);color:var(--ink);font:inherit;margin-bottom:12px}
+  dialog label{display:flex;align-items:center;gap:8px;font-size:14px;margin-bottom:12px}
+  .row{display:flex;gap:8px;justify-content:flex-end}
+  .row button{padding:9px 14px;border-radius:9px;background:var(--bg)}
+  .row button.primary{background:var(--gold);color:#1A1A1A;font-weight:600}
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Telugu Ear</h1>
+  <div class="seg" id="modeSeg">
+    <button data-mode="telugu" class="on">They speak Telugu</button>
+    <button data-mode="english">English</button>
+  </div>
+  <button class="gear" id="gearBtn" aria-label="Settings">⚙︎</button>
+</header>
+
+<main>
+  <div class="heard" id="heard"></div>
+  <div class="said empty" id="said">Tap Start, then keep this screen open. Translations play in your earbuds.</div>
+  <div class="replies" id="replies"></div>
+</main>
+
+<footer>
+  <div class="status" id="status"></div>
+  <button class="big" id="startBtn">Start listening</button>
+  <details>
+    <summary>Earlier</summary>
+    <div class="log" id="log"></div>
+  </details>
+</footer>
+
+<dialog id="dlg">
+  <h2>Settings</h2>
+  <p>Translation runs through Claude. Paste an Anthropic API key from console.anthropic.com. It stays on this phone.</p>
+  <input id="keyIn" type="password" placeholder="sk-ant-…" autocomplete="off">
+  <label><input type="checkbox" id="speakReply" checked> Read the first suggested reply aloud after a question</label>
+  <div class="row">
+    <button id="dlgCancel">Cancel</button>
+    <button class="primary" id="dlgSave">Save</button>
+  </div>
+</dialog>
+
+<script>
+(() => {
+  // ---------- state ----------
+  const MODES = {
+    telugu:  { rec:'te-IN', tts:'en-US', replyTts:'te-IN', src:'Telugu',  dst:'English' },
+    english: { rec:'en-US', tts:'te-IN', replyTts:'en-US', src:'English', dst:'Telugu'  },
+  };
+  let mode = 'telugu';
+  let listening = false;
+  let recog = null, restartTimer = null, silenceTimer = null;
+  let buffer = '';           // latest interim/final text for the current utterance
+  let apiKey = '';
+  let wakeLock = null;
+
+  const $ = id => document.getElementById(id);
+  const heardEl=$('heard'), saidEl=$('said'), repliesEl=$('replies'), statusEl=$('status'),
+        startBtn=$('startBtn'), logEl=$('log'), dlg=$('dlg');
+
+  // Remember the key between launches when the browser allows it.
+  try { apiKey = localStorage.getItem('teluguEarKey') || ''; } catch(e) {}
+  const setStatus = t => statusEl.textContent = t;
+
+  // ---------- speech in ----------
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SR) { setStatus('Speech recognition is not available in this browser. Use Safari on iPhone.'); startBtn.disabled = true; }
+
+  function startRecog() {
+    if (!SR || !listening) return;
+    try { recog && recog.abort(); } catch(e) {}
+    recog = new SR();
+    recog.lang = MODES[mode].rec;
+    recog.continuous = true;
+    recog.interimResults = true;
+    recog.onresult = e => {
+      let text = '';
+      for (let i = e.resultIndex; i < e.results.length; i++) text += e.results[i][0].transcript;
+      // Rebuild from all results so we don't lose earlier words in the utterance
+      text = Array.from(e.results).map(r => r[0].transcript).join(' ').trim();
+      buffer = text;
+      heardEl.textContent = text; heardEl.classList.add('live');
+      clearTimeout(silenceTimer);
+      silenceTimer = setTimeout(finishUtterance, 1200);
+    };
+    recog.onerror = e => {
+      if (e.error === 'not-allowed') { setStatus('Microphone blocked. Allow it in Safari → aA → Website settings.'); stop(); }
+      else if (e.error !== 'no-speech' && e.error !== 'aborted') setStatus('Mic hiccup (' + e.error + '), restarting');
+    };
+    recog.onend = () => {            // Safari ends sessions on its own; keep it going
+      if (listening) restartTimer = setTimeout(startRecog, 250);
+    };
+    try { recog.start(); setStatus('Listening for ' + MODES[mode].src); }
+    catch(e) { setStatus('Could not start mic: ' + e.message); }
+  }
+
+  function finishUtterance() {
+    const text = buffer.trim(); buffer = '';
+    heardEl.classList.remove('live');
+    if (!text) return;
+    try { recog.abort(); } catch(e) {}   // new session for the next sentence
+    translate(text);
+  }
+
+  // ---------- translate ----------
+  async function translate(text) {
+    if (!apiKey) { setStatus('Add your API key in settings ⚙︎'); dlg.showModal(); return; }
+    const m = MODES[mode];
+    setStatus('Translating');
+    const system = `You are a real-time interpreter. The other speaker uses ${m.src}; the user hears ${m.dst}.
+Respond ONLY with JSON, no markdown:
+{"translation":"<natural spoken ${m.dst}>","isQuestion":true|false,
+ "suggestedReplies":[{"source":"<reply in ${m.src}>","native":"<same reply in ${m.dst}>"}]}
+Give 3 short conversational replies if it is a question, else an empty array. Keep everything brief and colloquial.`;
+    try {
+      const res = await fetch('https://api.anthropic.com/v1/messages', {
+        method:'POST',
+        headers:{ 'Content-Type':'application/json', 'x-api-key':apiKey,
+                  'anthropic-version':'2023-06-01', 'anthropic-dangerous-direct-browser-access':'true' },
+        body: JSON.stringify({ model:'claude-sonnet-4-6', max_tokens:400, system,
+                               messages:[{role:'user', content:text}] })
+      });
+      const data = await res.json();
+      if (data.error) throw new Error(data.error.message);
+      const raw = data.content.map(b => b.text || '').join('').replace(/```json|```/g,'').trim();
+      const r = JSON.parse(raw);
+      show(text, r);
+      speak(r.translation, m.tts);
+      if (r.isQuestion && $('speakReply').checked && r.suggestedReplies[0])
+        speak('You could say: ' + r.suggestedReplies[0].native, m.tts);
+      setStatus('Listening for ' + m.src);
+    } catch(err) { setStatus('Translate failed: ' + err.message); }
+  }
+
+  function show(heard, r) {
+    saidEl.textContent = r.translation; saidEl.classList.remove('empty');
+    repliesEl.innerHTML = '';
+    (r.suggestedReplies || []).forEach(rep => {
+      const b = document.createElement('button');
+      b.innerHTML = `${esc(rep.native)}<small>${esc(rep.source)}</small>`;
+      b.onclick = () => speak(rep.source, MODES[mode].replyTts);
+      repliesEl.appendChild(b);
+    });
+    const row = document.createElement('div');
+    row.innerHTML = `${esc(heard)}<b>${esc(r.translation)}</b>`;
+    logEl.prepend(row);
+  }
+  const esc = s => String(s).replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+
+  // ---------- speech out ----------
+  function speak(text, lang) {
+    const u = new SpeechSynthesisUtterance(text);
+    u.lang = lang;
+    const v = speechSynthesis.getVoices().find(v => v.lang.replace('_','-').startsWith(lang.slice(0,2)));
+    if (v) u.voice = v;
+    u.rate = 1.05;
+    speechSynthesis.speak(u);
+  }
+  speechSynthesis.onvoiceschanged = () => speechSynthesis.getVoices();
+
+  // ---------- start / stop ----------
+  async function start() {
+    if (window.self !== window.top) {
+      setStatus('This preview can\'t use the mic. Open the file in Safari (Share → Safari), then tap Start.');
+      return;
+    }
+    if (!SR) { setStatus('Speech recognition unavailable here. Open in Safari on iPhone.'); return; }
+    setStatus('Starting…');
+    listening = true;
+    startBtn.textContent = 'Stop'; startBtn.classList.add('stop');
+    speak(' ', MODES[mode].tts);               // unlock audio output on iOS from the tap
+    try { wakeLock = await navigator.wakeLock?.request('screen'); } catch(e) {}
+    startRecog();
+  }
+  function stop() {
+    listening = false;
+    clearTimeout(restartTimer); clearTimeout(silenceTimer);
+    try { recog && recog.abort(); } catch(e) {}
+    speechSynthesis.cancel();
+    wakeLock?.release(); wakeLock = null;
+    startBtn.textContent = 'Start listening'; startBtn.classList.remove('stop');
+    heardEl.textContent = ''; heardEl.classList.remove('live');
+    setStatus('');
+  }
+  startBtn.onclick = () => {
+    try { listening ? stop() : start(); }
+    catch(e) { setStatus('Error: ' + e.message); }
+  };
+
+  $('modeSeg').onclick = e => {
+    const b = e.target.closest('button'); if (!b) return;
+    mode = b.dataset.mode;
+    document.querySelectorAll('#modeSeg button').forEach(x => x.classList.toggle('on', x === b));
+    if (listening) startRecog();
+  };
+
+  // ---------- settings ----------
+  $('gearBtn').onclick = () => { $('keyIn').value = apiKey; dlg.showModal(); };
+  $('dlgCancel').onclick = () => dlg.close();
+  $('dlgSave').onclick = () => {
+    apiKey = $('keyIn').value.trim();
+    try { localStorage.setItem('teluguEarKey', apiKey); } catch(e) {}
+    dlg.close();
+  };
+  if (!apiKey) setStatus('First, add your API key in settings ⚙︎');
+
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible' && listening && !wakeLock)
+      navigator.wakeLock?.request('screen').then(w => wakeLock = w).catch(()=>{});
+  });
+})();
+</script>
+</body>
+</html>
