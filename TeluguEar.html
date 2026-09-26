@@ -65,7 +65,7 @@
 <body>
 
 <header>
-  <h1>Telugu Ear <span style="font-size:11px;color:var(--dim)">v4</span></h1>
+  <h1>Telugu Ear <span style="font-size:11px;color:var(--dim)">v5</span></h1>
   <div class="seg" id="modeSeg">
     <button data-mode="telugu" class="on">They speak Telugu</button>
     <button data-mode="english">English</button>
@@ -77,6 +77,8 @@
   <div class="heard" id="heard"></div>
   <div class="said empty" id="said">Tap Start, then keep this screen open. Translations play in your earbuds.</div>
   <div class="replies" id="replies"></div>
+  <textarea id="dictate" rows="2" placeholder="Or tap here, then the keyboard mic key, and let them talk"
+    style="width:100%;background:var(--pane);color:var(--ink);border:1px solid var(--dim);border-radius:10px;padding:10px;font:inherit;font-size:16px"></textarea>
 </main>
 
 <footer>
@@ -272,6 +274,17 @@ Give 3 short conversational replies if it is a question, else an empty array. Ke
     document.querySelectorAll('#modeSeg button').forEach(x => x.classList.toggle('on', x === b));
     if (listening) startRecog();
   };
+
+  // ---------- keyboard dictation fallback ----------
+  const dictEl = $('dictate'); let dictTimer = null;
+  dictEl.addEventListener('input', () => {
+    clearTimeout(dictTimer);
+    dictTimer = setTimeout(() => {
+      const t = dictEl.value.trim(); if (!t) return;
+      dictEl.value = '';
+      translate(t);
+    }, 1500);
+  });
 
   // ---------- settings ----------
   $('gearBtn').onclick = () => { $('keyIn').value = apiKey; dlg.showModal(); };
