@@ -65,7 +65,7 @@
 <body>
 
 <header>
-  <h1>Telugu Ear <span style="font-size:11px;color:var(--dim)">v5</span></h1>
+  <h1>Telugu Ear <span style="font-size:11px;color:var(--dim)">v7</span></h1>
   <div class="seg" id="modeSeg">
     <button data-mode="telugu" class="on">They speak Telugu</button>
     <button data-mode="english">English</button>
@@ -223,15 +223,37 @@ Give 3 short conversational replies if it is a question, else an empty array. Ke
   const esc = s => String(s).replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
 
   // ---------- speech out ----------
-  function speak(text, lang) {
+  function pickVoice(lang) {
+    const want = lang.slice(0,2).toLowerCase();
+    const vs = speechSynthesis.getVoices().filter(v => v.lang.replace('_','-').toLowerCase().startsWith(want));
+    return vs.find(v => /enhanced|premium/i.test(v.name)) || vs.find(v => v.localService) || vs[0] || null;
+  }
+  function deviceSpeak(text, lang) {
     const u = new SpeechSynthesisUtterance(text);
-    u.lang = lang;
-    const v = speechSynthesis.getVoices().find(v => v.lang.replace('_','-').startsWith(lang.slice(0,2)));
-    if (v) u.voice = v;
-    u.rate = 1.05;
-    speechSynthesis.speak(u);
+    u.lang = lang; const v = pickVoice(lang); if (v) u.voice = v;
+    u.rate = 0.95; speechSynthesis.speak(u);
+  }
+  // Telugu: stream Google Translate's pronunciation audio (no key). Queue clips so they play in order.
+  const player = new Audio(); player.playsInline = true;
+  const queue = []; let playing = false;
+  function playNext() {
+    if (playing || !queue.length) return;
+    const { text, lang } = queue.shift(); playing = true;
+    const url = 'https://translate.google.com/translate_tts?ie=UTF-8&client=tw-ob&tl=' + lang.slice(0,2) + '&q=' + encodeURIComponent(text);
+    player.src = url;
+    player.onended = () => { playing = false; playNext(); };
+    player.onerror = () => { playing = false; deviceSpeak(text, lang); playNext(); };
+    player.play().catch(() => { playing = false; deviceSpeak(text, lang); playNext(); });
+  }
+  function speak(text, lang) {
+    if (!lang.startsWith('te')) { deviceSpeak(text, lang); return; }
+    // ~200-char limit per clip: split on sentence breaks
+    text.match(/[^.!?।]+[.!?।]?/g).map(t => t.trim()).filter(Boolean)
+        .forEach(t => queue.push({ text: t.slice(0,190), lang }));
+    playNext();
   }
   speechSynthesis.onvoiceschanged = () => speechSynthesis.getVoices();
+  speechSynthesis.getVoices();   // iOS loads the list lazily; warm it up
 
   // ---------- start / stop ----------
   async function start() {
@@ -244,6 +266,7 @@ Give 3 short conversational replies if it is a question, else an empty array. Ke
     listening = true;
     startBtn.textContent = 'Stop'; startBtn.classList.add('stop');
     speak(' ', MODES[mode].tts);               // unlock audio output on iOS from the tap
+    try { player.src = 'data:audio/mp3;base64,//uQxAAAAAAAAAAAAAAAAAAAAAAAWGluZwAAAA8AAAACAAACcQCA'; player.play().catch(()=>{}); } catch(e) {}
     failedStarts = 0;
     startRecog();                              // must run inside the tap, before any await
     try { micStream = await navigator.mediaDevices.getUserMedia({audio:true}); dbg('mic permission ok'); }
@@ -277,6 +300,7 @@ Give 3 short conversational replies if it is a question, else an empty array. Ke
 
   // ---------- keyboard dictation fallback ----------
   const dictEl = $('dictate'); let dictTimer = null;
+  dictEl.addEventListener('focus', () => { try { player.src = 'data:audio/mp3;base64,//uQxAAAAAAAAAAAAAAAAAAAAAAAWGluZwAAAA8AAAACAAACcQCA'; player.play().catch(()=>{}); speechSynthesis.speak(new SpeechSynthesisUtterance(' ')); } catch(e) {} }, { once:true });
   dictEl.addEventListener('input', () => {
     clearTimeout(dictTimer);
     dictTimer = setTimeout(() => {
