@@ -65,7 +65,7 @@
 <body>
 
 <header>
-  <h1>Telugu Ear</h1>
+  <h1>Telugu Ear <span style="font-size:11px;color:var(--dim)">v3</span></h1>
   <div class="seg" id="modeSeg">
     <button data-mode="telugu" class="on">They speak Telugu</button>
     <button data-mode="english">English</button>
@@ -100,6 +100,7 @@
 </dialog>
 
 <script>
+window.onerror = (m,src,l) => { const e=document.getElementById('status'); if(e) e.textContent='Page error: '+m+' (line '+l+')'; };
 (() => {
   // ---------- state ----------
   const MODES = {
@@ -152,7 +153,7 @@
     recog.onend = () => {            // Safari ends sessions on its own; keep it going
       if (listening) restartTimer = setTimeout(startRecog, 250);
     };
-    try { recog.start(); setStatus('Listening for ' + MODES[mode].src); }
+    try { recog.start(); setStatus('Requesting mic…'); }
     catch(e) { setStatus('Could not start mic: ' + e.message); }
   }
 
@@ -232,6 +233,8 @@ Give 3 short conversational replies if it is a question, else an empty array. Ke
     startBtn.textContent = 'Stop'; startBtn.classList.add('stop');
     speak(' ', MODES[mode].tts);               // unlock audio output on iOS from the tap
     startRecog();                              // must run inside the tap, before any await
+    setTimeout(() => { if (listening && statusEl.textContent === 'Requesting mic…')
+      setStatus('Mic never started. Settings → General → Keyboard → Enable Dictation, then reload.'); }, 4000);
     try { wakeLock = await navigator.wakeLock?.request('screen'); } catch(e) {}
   }
   function stop() {
