@@ -143,9 +143,12 @@
       silenceTimer = setTimeout(finishUtterance, 1200);
     };
     recog.onerror = e => {
-      if (e.error === 'not-allowed') { setStatus('Microphone blocked. Allow it in Safari → aA → Website settings.'); stop(); }
-      else if (e.error !== 'no-speech' && e.error !== 'aborted') setStatus('Mic hiccup (' + e.error + '), restarting');
+      if (e.error === 'not-allowed' || e.error === 'service-not-allowed') {
+        setStatus('Mic or dictation blocked (' + e.error + '). Check Settings → Siri → Dictation is on, and Safari has mic access.');
+        stop();
+      } else if (e.error !== 'no-speech' && e.error !== 'aborted') setStatus('Mic error: ' + e.error);
     };
+    recog.onstart = () => setStatus('Mic on — listening for ' + MODES[mode].src);
     recog.onend = () => {            // Safari ends sessions on its own; keep it going
       if (listening) restartTimer = setTimeout(startRecog, 250);
     };
@@ -228,8 +231,8 @@ Give 3 short conversational replies if it is a question, else an empty array. Ke
     listening = true;
     startBtn.textContent = 'Stop'; startBtn.classList.add('stop');
     speak(' ', MODES[mode].tts);               // unlock audio output on iOS from the tap
+    startRecog();                              // must run inside the tap, before any await
     try { wakeLock = await navigator.wakeLock?.request('screen'); } catch(e) {}
-    startRecog();
   }
   function stop() {
     listening = false;
