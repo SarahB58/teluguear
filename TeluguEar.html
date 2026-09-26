@@ -65,7 +65,7 @@
 <body>
 
 <header>
-  <h1>Telugu Ear <span style="font-size:11px;color:var(--dim)">v3</span></h1>
+  <h1>Telugu Ear <span style="font-size:11px;color:var(--dim)">v4</span></h1>
   <div class="seg" id="modeSeg">
     <button data-mode="telugu" class="on">They speak Telugu</button>
     <button data-mode="english">English</button>
@@ -81,6 +81,7 @@
 
 <footer>
   <div class="status" id="status"></div>
+  <div class="status" id="debug" style="font-size:11px;opacity:.7"></div>
   <button class="big" id="startBtn">Start listening</button>
   <details>
     <summary>Earlier</summary>
@@ -121,6 +122,8 @@ window.onerror = (m,src,l) => { const e=document.getElementById('status'); if(e)
   // Remember the key between launches when the browser allows it.
   try { apiKey = localStorage.getItem('teluguEarKey') || ''; } catch(e) {}
   const setStatus = t => statusEl.textContent = t;
+  const dbg = t => { const d=$('debug'); d.textContent = (new Date().toLocaleTimeString().slice(0,8)) + ' ' + t + ' | ' + d.textContent.slice(0,120); };
+  let micStream = null, failedStarts = 0;
 
   // ---------- speech in ----------
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -131,7 +134,7 @@ window.onerror = (m,src,l) => { const e=document.getElementById('status'); if(e)
     try { recog && recog.abort(); } catch(e) {}
     recog = new SR();
     recog.lang = MODES[mode].rec;
-    recog.continuous = true;
+    recog.continuous = false;   // continuous is unreliable on iOS Safari
     recog.interimResults = true;
     recog.onresult = e => {
       let text = '';
@@ -144,15 +147,22 @@ window.onerror = (m,src,l) => { const e=document.getElementById('status'); if(e)
       silenceTimer = setTimeout(finishUtterance, 1200);
     };
     recog.onerror = e => {
+      dbg('error:' + e.error);
       if (e.error === 'not-allowed' || e.error === 'service-not-allowed') {
         setStatus('Mic or dictation blocked (' + e.error + '). Check Settings → Siri → Dictation is on, and Safari has mic access.');
         stop();
       } else if (e.error !== 'no-speech' && e.error !== 'aborted') setStatus('Mic error: ' + e.error);
     };
-    recog.onstart = () => setStatus('Mic on — listening for ' + MODES[mode].src);
+    recog.onstart = () => { dbg('start'); failedStarts = 0; setStatus('Mic on — listening for ' + MODES[mode].src); };
     recog.onend = () => {            // Safari ends sessions on its own; keep it going
-      if (listening) restartTimer = setTimeout(startRecog, 250);
+      dbg('end');
+      if (!listening) return;
+      failedStarts++;
+      if (failedStarts > 6) { setStatus('Mic keeps closing. Try the English mode, or check Settings → Siri → Dictation.'); stop(); return; }
+      restartTimer = setTimeout(startRecog, 600);
     };
+    recog.onaudiostart = () => dbg('audio');
+    recog.onspeechstart = () => dbg('speech');
     try { recog.start(); setStatus('Requesting mic…'); }
     catch(e) { setStatus('Could not start mic: ' + e.message); }
   }
@@ -232,7 +242,10 @@ Give 3 short conversational replies if it is a question, else an empty array. Ke
     listening = true;
     startBtn.textContent = 'Stop'; startBtn.classList.add('stop');
     speak(' ', MODES[mode].tts);               // unlock audio output on iOS from the tap
+    failedStarts = 0;
     startRecog();                              // must run inside the tap, before any await
+    try { micStream = await navigator.mediaDevices.getUserMedia({audio:true}); dbg('mic permission ok'); }
+    catch(e) { dbg('getUserMedia:' + e.name); }
     setTimeout(() => { if (listening && statusEl.textContent === 'Requesting mic…')
       setStatus('Mic never started. Settings → General → Keyboard → Enable Dictation, then reload.'); }, 4000);
     try { wakeLock = await navigator.wakeLock?.request('screen'); } catch(e) {}
@@ -243,6 +256,7 @@ Give 3 short conversational replies if it is a question, else an empty array. Ke
     try { recog && recog.abort(); } catch(e) {}
     speechSynthesis.cancel();
     wakeLock?.release(); wakeLock = null;
+    micStream?.getTracks().forEach(t => t.stop()); micStream = null;
     startBtn.textContent = 'Start listening'; startBtn.classList.remove('stop');
     heardEl.textContent = ''; heardEl.classList.remove('live');
     setStatus('');
